@@ -1,0 +1,13 @@
+{
+  "payload": {
+    "schema": 1,
+    "purpose": "qcontract-update",
+    "version": "2.2.0",
+    "asset_name": "QContract-Setup-2.2.0.exe",
+    "url": "https://github.com/hussin0100808-ux/qcontract-releases/releases/download/v2.2.0/QContract-Setup-2.2.0.exe",
+    "sha256": "4c3fb642d04890215d84d76874b211342ef0efb06270e478a5b579da498d9255",
+    "size": 117269436,
+    "release_notes": "إعدادات البرنامج، تفعيل عبر الإنترنت بالأيام أو مدى الحياة، تحديثات GitHub موقعة، وقراءة AI محلية مجانية للعربية والإنجليزية."
+  },
+  "signature": "Y+uKedCFmrLtfAsOwXuO6bA3TmibyWKxgOFFekf/4o7x4ayuKxije3wXW3ss9iCSN12R4TeBIbnCcDrcZQqpCw=="
+}
