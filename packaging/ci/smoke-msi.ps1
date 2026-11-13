@@ -429,10 +429,27 @@ function Assert-Shortcut([string]$ShortcutPath) {
 }
 
 function Assert-WebViewAcl([string]$Directory) {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  try { $currentSid = $identity.User.Value } finally { $identity.Dispose() }
+  [long]$fullControl = [Security.AccessControl.FileSystemRights]::FullControl
   $items = @((Get-Item -LiteralPath $Directory)) + @(Get-ChildItem -LiteralPath $Directory -Recurse -Force)
   foreach ($item in $items) {
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'WebView runtime reparse point.' }
     $rules = (Get-Acl -LiteralPath $item.FullName).GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
+    $currentUserRules = @($rules | Where-Object { $_.IdentityReference.Value -eq $currentSid })
+    if (@($currentUserRules | Where-Object { $_.AccessControlType -eq 'Deny' }).Count) {
+      throw 'WebView permissions deny access to the installing Windows user.'
+    }
+    [long]$currentUserRights = 0
+    foreach ($rule in ($currentUserRules | Where-Object {
+      $_.AccessControlType -eq 'Allow' -and -not $_.IsInherited -and
+      -not ($_.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly)
+    })) { $currentUserRights = $currentUserRights -bor [long]$rule.FileSystemRights }
+    # Require the authored user ACE; an inherited user or Administrators grant
+    # must not hide a FormattedSDDL account that resolved to the wrong SID.
+    if (($currentUserRights -band $fullControl) -ne $fullControl) {
+      throw 'WebView permissions lack explicit full control for the installing Windows user.'
+    }
     foreach ($sid in @('S-1-15-2-1','S-1-15-2-2')) {
       $allow = @($rules | Where-Object { $_.IdentityReference.Value -eq $sid -and $_.AccessControlType -eq 'Allow' })
       [long]$rights = 0
@@ -442,6 +459,7 @@ function Assert-WebViewAcl([string]$Directory) {
     }
   }
   $result.webview_acl_items_verified = $items.Count
+  $result.webview_current_user_acl_verified = $true
 }
 
 function Invoke-PythonJson([string]$Python,[string[]]$Arguments,[string]$ResultName) {
