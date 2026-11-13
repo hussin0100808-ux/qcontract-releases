@@ -75,6 +75,16 @@ jobs:
           QA_GITHUB_TOKEN: ${{ github.token }}
         run: |
           & "$env:GITHUB_WORKSPACE\packaging\ci\smoke-msi.ps1" -RequestPath "$env:GITHUB_WORKSPACE\.qa\msi-candidate-request.json"
+      - name: Report synthetic verification result
+        if: always()
+        shell: powershell
+        run: |
+          $result = Join-Path $env:RUNNER_TEMP 'qcontract-msi-results\result.json'
+          if (Test-Path -LiteralPath $result) {
+            Write-Output 'QCONTRACT_RESULT_BEGIN'
+            Get-Content -LiteralPath $result -Raw
+            Write-Output 'QCONTRACT_RESULT_END'
+          }
       - name: Retain synthetic test results and installer logs only
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
