@@ -36,12 +36,24 @@ Creating the workflow file itself may require GitHub Workflows write permission;
 this does not justify expanding the activation app's existing permissions.
 
 The job uses the standard windows-2025 hosted image: a fresh Windows Server 2025
-VM with preinstalled development tools. It is not a clean consumer Windows 10/11
-certification. A bundled-process DLL probe checks that VC runtime DLLs resolve
-inside the package, rather than relying on those preinstalled development tools.
-The inference process gets its own outbound firewall block in this disposable VM;
-the harness never changes Defender settings or adds exclusions. Its firewall rule
-is removed in finally. Only synthetic state is used; logs and result JSON expire
+VM with preinstalled development tools. The initial read-only readiness run
+43508342110 found its Defender service/antivirus in Normal mode, but real-time
+protection disabled; that run failed before any candidate download or execution.
+The revised first step requires that existing Normal-mode service and enables
+real-time protection, when needed, with only the supported command
+`Set-MpPreference -DisableRealtimeMonitoring $false`. Strong hosted Windows,
+repository and main-branch guards precede that action. Verification has a
+60-second bound and must show service, antivirus and real-time protection active
+in Normal mode before checkout or download. If policy refuses, the job fails;
+there are no tamper/registry workarounds, exclusions, restores, or other preference
+changes. No owner's or tester's device is modified by this bootstrap.
+
+This remains different from a clean consumer Windows 10/11 certification.
+A bundled-process DLL probe checks that VC runtime DLLs resolve inside the package,
+rather than relying on preinstalled development tools. The inference process gets
+its own outbound firewall block in this disposable VM. Firewall profiles must
+already be enabled; its unique process rule is removed in finally.
+Only synthetic state is used; logs and result JSON expire
 after three days. No real IDs, license, private keys, user data, profile, MSI, or
 download URLs are uploaded as workflow artifacts.
 
