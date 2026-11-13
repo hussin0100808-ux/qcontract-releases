@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "ready": true,
+  "version": "2.3.0",
+  "release_id": 444767054,
+  "asset_id": 745281748,
+  "asset_name": "QContract-Setup-2.3.0.msi",
+  "size": 387137536,
+  "sha256": "c9af514898e5fc351510eaccf945518d291879fc32b5845b3be77a23036b751f",
+  "expected_manifest": {
+    "path": "runtime/client-integrity.json",
+    "sha256": "005cc88183b4036beab0db4827aee50cc42ee10b66447048388856517710bd2e"
+  }
+}
