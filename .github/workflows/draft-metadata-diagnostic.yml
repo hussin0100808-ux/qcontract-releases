@@ -1,0 +1,79 @@
+name: Diagnose draft metadata access
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/draft-metadata-diagnostic.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    if: github.repository == 'hussin0100808-ux/qcontract-releases'
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Report HTTP status only for fixed release metadata
+        shell: powershell
+        env:
+          QA_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or
+              $env:RUNNER_OS -ne 'Windows' -or $env:GITHUB_REF -ne 'refs/heads/main' -or
+              $env:GITHUB_REPOSITORY -ne 'hussin0100808-ux/qcontract-releases' -or
+              $PSVersionTable.PSVersion.Major -ne 5) {
+            throw 'This read-only diagnostic requires the approved hosted Windows PowerShell 5 main job.'
+          }
+          Add-Type -AssemblyName System.Net.Http
+          $token = $env:QA_GITHUB_TOKEN
+          function Get-FixedMetadataStatus([string]$Phase,[string]$Url) {
+            if ($Url -cnotin @(
+              'https://api.github.com/repos/hussin0100808-ux/qcontract-releases/releases/tags/v2.2.0',
+              'https://api.github.com/repos/hussin0100808-ux/qcontract-releases/releases/444767054'
+            )) { throw 'Unapproved diagnostic metadata target.' }
+            if (-not $token) {
+              [ordered]@{phase=$Phase;http_status=0;exception_type='MissingWorkflowToken'} | ConvertTo-Json -Compress | Write-Host
+              return 0
+            }
+            $handler = New-Object System.Net.Http.HttpClientHandler
+            $handler.AllowAutoRedirect = $false
+            $client = New-Object System.Net.Http.HttpClient($handler)
+            $client.Timeout = [TimeSpan]::FromSeconds(30)
+            $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get,[uri]$Url)
+            $request.Headers.UserAgent.ParseAdd('QContract-metadata-diagnostic/1')
+            $request.Headers.Accept.ParseAdd('application/vnd.github+json')
+            $request.Headers.Add('X-GitHub-Api-Version','2022-11-28')
+            $request.Headers.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer',$token)
+            $response = $null
+            try {
+              $response = $client.SendAsync($request,[System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+              $status = [int]$response.StatusCode
+              [ordered]@{phase=$Phase;http_status=$status} | ConvertTo-Json -Compress | Write-Host
+              return $status
+            } catch {
+              [ordered]@{phase=$Phase;http_status=0;exception_type=$_.Exception.GetBaseException().GetType().FullName} | ConvertTo-Json -Compress | Write-Host
+              return 0
+            } finally {
+              if ($null -ne $response) { $response.Dispose() }
+              $request.Dispose(); $client.Dispose(); $handler.Dispose()
+            }
+          }
+          try {
+            $null = Get-FixedMetadataStatus 'published-control-default' 'https://api.github.com/repos/hussin0100808-ux/qcontract-releases/releases/tags/v2.2.0'
+            $draftStatus = Get-FixedMetadataStatus 'draft-default' 'https://api.github.com/repos/hussin0100808-ux/qcontract-releases/releases/444767054'
+            if ($draftStatus -eq 0) {
+              $originalProtocol = [Net.ServicePointManager]::SecurityProtocol
+              try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                $null = Get-FixedMetadataStatus 'draft-process-tls12' 'https://api.github.com/repos/hussin0100808-ux/qcontract-releases/releases/444767054'
+              } finally { [Net.ServicePointManager]::SecurityProtocol = $originalProtocol }
+            }
+          } finally {
+            $token = $null
+            $env:QA_GITHUB_TOKEN = $null
+          }
+          # HTTP diagnostics are observations, never an installer verdict.
+          exit 0
