@@ -1,0 +1,45 @@
+name: Verify draft MSI candidate
+
+on:
+  push:
+    branches: [main]
+    paths: ['.qa/msi-candidate-request.json']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qcontract-msi-candidate
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: github.repository == 'hussin0100808-ux/qcontract-releases'
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - name: Check out only public QA harness and request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            packaging/ci
+            .qa/msi-candidate-request.json
+          sparse-checkout-cone-mode: false
+      - name: Verify and exercise candidate in this disposable VM
+        shell: powershell
+        env:
+          QA_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          & "$env:GITHUB_WORKSPACE\packaging\ci\smoke-msi.ps1" -RequestPath "$env:GITHUB_WORKSPACE\.qa\msi-candidate-request.json"
+      - name: Retain synthetic test results and installer logs only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: msi-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/qcontract-msi-results/*
+          if-no-files-found: error
+          retention-days: 3
+          include-hidden-files: false
+
