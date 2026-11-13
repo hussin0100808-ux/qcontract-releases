@@ -15,6 +15,48 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 5
     steps:
+      - name: Require active protection in the disposable hosted VM
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or
+              $env:RUNNER_OS -ne 'Windows' -or $env:GITHUB_REF -ne 'refs/heads/main' -or
+              $env:GITHUB_REPOSITORY -ne 'hussin0100808-ux/qcontract-releases') {
+            throw 'Protection bootstrap is restricted to the approved disposable GitHub-hosted Windows main job.'
+          }
+          $before = Get-MpComputerStatus
+          [ordered]@{
+            phase='before';service_enabled=[bool]$before.AMServiceEnabled
+            antivirus_enabled=[bool]$before.AntivirusEnabled
+            real_time_enabled=[bool]$before.RealTimeProtectionEnabled
+            running_mode=[string]$before.AMRunningMode
+          } | ConvertTo-Json
+          if (-not $before.AMServiceEnabled -or -not $before.AntivirusEnabled -or $before.AMRunningMode -ne 'Normal') {
+            throw 'An existing normal Defender service and antivirus are required; no repair or workaround will be attempted.'
+          }
+          $enableRequested = -not $before.RealTimeProtectionEnabled
+          if ($enableRequested) {
+            Write-Output 'Enabling real-time protection in this disposable VM through the supported Defender cmdlet.'
+            try { Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop }
+            catch { throw 'Defender refused the protection enable request. No tamper, registry, or exclusion workaround will be attempted.' }
+          }
+          $deadline = [DateTime]::UtcNow.AddSeconds(60)
+          do {
+            $after = Get-MpComputerStatus
+            $protected = $after.AMServiceEnabled -and $after.AntivirusEnabled -and
+              $after.RealTimeProtectionEnabled -and $after.AMRunningMode -eq 'Normal'
+            if ($protected) { break }
+            if ([DateTime]::UtcNow -ge $deadline) { break }
+            Start-Sleep -Milliseconds 1000
+          } while ($true)
+          [ordered]@{
+            phase='after';enable_requested=[bool]$enableRequested
+            service_enabled=[bool]$after.AMServiceEnabled
+            antivirus_enabled=[bool]$after.AntivirusEnabled
+            real_time_enabled=[bool]$after.RealTimeProtectionEnabled
+            running_mode=[string]$after.AMRunningMode
+          } | ConvertTo-Json
+          if (-not $protected) { throw 'Normal Defender real-time protection did not become active within 60 seconds; refusing further work.' }
       - name: Read existing protection and platform state
         shell: powershell
         run: |
@@ -49,10 +91,10 @@ jobs:
           $summary | ConvertTo-Json -Depth 5
           if (-not $defender.AMServiceEnabled -or -not $defender.AntivirusEnabled -or
               -not $defender.RealTimeProtectionEnabled -or $defender.AMRunningMode -ne 'Normal') {
-            throw 'Defender is not already active in Normal mode with real-time protection. No settings were changed.'
+            throw 'Defender is not active in Normal mode with real-time protection; refusing further work.'
           }
           if ($profiles.Count -ne 3 -or @($profiles | Where-Object { $_.Enabled -ne 'True' }).Count -ne 0) {
-            throw 'All three firewall profiles must already be enabled. No settings were changed.'
+            throw 'All three firewall profiles must already be enabled. Firewall settings were not changed.'
           }
           if ($netRelease -lt 461808) {
             throw '.NET Framework 4.7.2 or later is required. Nothing was installed.'
