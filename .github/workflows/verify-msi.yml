@@ -19,6 +19,48 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 40
     steps:
+      - name: Require active protection in the disposable hosted VM
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or
+              $env:RUNNER_OS -ne 'Windows' -or $env:GITHUB_REF -ne 'refs/heads/main' -or
+              $env:GITHUB_REPOSITORY -ne 'hussin0100808-ux/qcontract-releases') {
+            throw 'Protection bootstrap is restricted to the approved disposable GitHub-hosted Windows main job.'
+          }
+          $before = Get-MpComputerStatus
+          [ordered]@{
+            phase='before';service_enabled=[bool]$before.AMServiceEnabled
+            antivirus_enabled=[bool]$before.AntivirusEnabled
+            real_time_enabled=[bool]$before.RealTimeProtectionEnabled
+            running_mode=[string]$before.AMRunningMode
+          } | ConvertTo-Json
+          if (-not $before.AMServiceEnabled -or -not $before.AntivirusEnabled -or $before.AMRunningMode -ne 'Normal') {
+            throw 'An existing normal Defender service and antivirus are required; no repair or workaround will be attempted.'
+          }
+          $enableRequested = -not $before.RealTimeProtectionEnabled
+          if ($enableRequested) {
+            Write-Output 'Enabling real-time protection in this disposable VM through the supported Defender cmdlet.'
+            try { Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop }
+            catch { throw 'Defender refused the protection enable request. No tamper, registry, or exclusion workaround will be attempted.' }
+          }
+          $deadline = [DateTime]::UtcNow.AddSeconds(60)
+          do {
+            $after = Get-MpComputerStatus
+            $protected = $after.AMServiceEnabled -and $after.AntivirusEnabled -and
+              $after.RealTimeProtectionEnabled -and $after.AMRunningMode -eq 'Normal'
+            if ($protected) { break }
+            if ([DateTime]::UtcNow -ge $deadline) { break }
+            Start-Sleep -Milliseconds 1000
+          } while ($true)
+          [ordered]@{
+            phase='after';enable_requested=[bool]$enableRequested
+            service_enabled=[bool]$after.AMServiceEnabled
+            antivirus_enabled=[bool]$after.AntivirusEnabled
+            real_time_enabled=[bool]$after.RealTimeProtectionEnabled
+            running_mode=[string]$after.AMRunningMode
+          } | ConvertTo-Json
+          if (-not $protected) { throw 'Normal Defender real-time protection did not become active within 60 seconds; refusing further work.' }
       - name: Check out only public QA harness and request
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,4 +84,3 @@ jobs:
           if-no-files-found: error
           retention-days: 3
           include-hidden-files: false
-
