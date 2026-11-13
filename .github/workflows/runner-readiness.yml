@@ -1,0 +1,59 @@
+name: Check hosted Windows security readiness
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/runner-readiness.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    if: github.repository == 'hussin0100808-ux/qcontract-releases'
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Read existing protection and platform state
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or
+              $env:RUNNER_OS -ne 'Windows' -or $env:GITHUB_REF -ne 'refs/heads/main') {
+            throw 'Expected the approved hosted Windows main-branch job.'
+          }
+          $defender = Get-MpComputerStatus
+          $profiles = @(Get-NetFirewallProfile)
+          $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem
+          $netRelease = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full').Release
+          $summary = [ordered]@{
+            schema = 1
+            image = 'windows-2025'
+            image_version = $env:ImageVersion
+            os_version = $osInfo.Version
+            os_build = $osInfo.BuildNumber
+            os_product_type = $osInfo.ProductType
+            net_framework_release = $netRelease
+            net_framework_472_or_later = ($netRelease -ge 461808)
+            defender_service_enabled = [bool]$defender.AMServiceEnabled
+            defender_antivirus_enabled = [bool]$defender.AntivirusEnabled
+            defender_real_time_enabled = [bool]$defender.RealTimeProtectionEnabled
+            defender_running_mode = [string]$defender.AMRunningMode
+            defender_engine_version = [string]$defender.AMEngineVersion
+            defender_signature_version = [string]$defender.AntivirusSignatureVersion
+            firewall_profiles = @($profiles | ForEach-Object {
+              [ordered]@{name=[string]$_.Name;enabled=($_.Enabled -eq 'True')}
+            })
+          }
+          $summary | ConvertTo-Json -Depth 5
+          if (-not $defender.AMServiceEnabled -or -not $defender.AntivirusEnabled -or
+              -not $defender.RealTimeProtectionEnabled -or $defender.AMRunningMode -ne 'Normal') {
+            throw 'Defender is not already active in Normal mode with real-time protection. No settings were changed.'
+          }
+          if ($profiles.Count -ne 3 -or @($profiles | Where-Object { $_.Enabled -ne 'True' }).Count -ne 0) {
+            throw 'All three firewall profiles must already be enabled. No settings were changed.'
+          }
+          if ($netRelease -lt 461808) {
+            throw '.NET Framework 4.7.2 or later is required. Nothing was installed.'
+          }
