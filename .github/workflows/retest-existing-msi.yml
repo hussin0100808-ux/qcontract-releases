@@ -106,3 +106,4 @@ jobs:
           if-no-files-found: error
           retention-days: 3
           include-hidden-files: false
+# Diagnostic attempt 2: observe ACLs of the same verified installer.
