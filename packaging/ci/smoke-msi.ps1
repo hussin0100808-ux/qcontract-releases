@@ -200,8 +200,11 @@ function Assert-MsiTables([string]$Path) {
   $approvedTables = @('_Tables','_Columns','_Validation','_Streams','_Storages','Property','Directory','Feature',
     'Component','FeatureComponents','File','Registry','CreateFolder','Shortcut','MsiShortcutProperty','IniFile','RemoveFile',
     'RegLocator','AppSearch','LaunchCondition','Upgrade','MsiLockPermissionsEx','InstallExecuteSequence','InstallUISequence',
-    'Media','Icon','MsiFileHash','QContractPayloadHash')
+    'Media','Icon','MsiFileHash','QContractPayloadHash','Signature')
   foreach ($table in $tables) { if ($table -notin $approvedTables) { throw 'Unapproved MSI table.' } }
+  if ($tables -notcontains 'Signature' -or @(Read-MsiRows $database 'SELECT `Signature`,`FileName`,`MinVersion`,`MaxVersion`,`MinSize`,`MaxSize`,`MinDate`,`MaxDate`,`Languages` FROM `Signature`').Count -ne 0) {
+    throw 'The standard empty Signature table is required for raw registry prerequisite searches.'
+  }
   foreach ($table in @('CustomAction','ServiceInstall','ServiceControl','SelfReg','TypeLib','MsiEmbeddedUI','MsiEmbeddedChainer','ODBCDriver','ODBCTranslator','Extension','Verb','ProgId','Class','AppId','Environment','MoveFiles','DuplicateFile')) {
     if ($tables -contains $table) {
       if (@(Read-MsiRows $database ('SELECT * FROM `' + $table + '`')).Count -ne 0) { throw 'MSI contains an executable/custom/service registration table.' }
@@ -374,7 +377,13 @@ function Invoke-Msi([string]$Operation,[string]$LogName) {
   }
   $process = Start-Process -FilePath $msiexec -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
   $result[$LogName + '_exit_code'] = $process.ExitCode
-  if ($process.ExitCode -ne 0) { throw ('Windows Installer failed or requested a reboot during ' + $Operation + '.') }
+  if ($process.ExitCode -ne 0) {
+    Write-Output 'QCONTRACT_INSTALL_FAILURE_LOG_BEGIN'
+    Select-String -LiteralPath $log -Pattern 'Error [0-9]{3,4}|Return value 3|error status: [0-9]+' -Context 4,3 |
+      Select-Object -First 8 | ForEach-Object { Write-Output $_.ToString() }
+    Write-Output 'QCONTRACT_INSTALL_FAILURE_LOG_END'
+    throw ('Windows Installer failed or requested a reboot during ' + $Operation + '.')
+  }
 }
 
 function Assert-PayloadIntegrity {
