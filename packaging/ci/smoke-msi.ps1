@@ -500,6 +500,21 @@ function Assert-Shortcut([string]$ShortcutPath) {
   if ($item.ExtendedProperty('System.AppUserModel.ID') -ne 'QContract.Desktop') { throw 'Shortcut application ID is incorrect.' }
 }
 
+function Get-WebViewAclSnapshot([string]$Path,[string]$CurrentSid) {
+  $descriptor = Get-Acl -LiteralPath $Path
+  $selectedSids = @($CurrentSid,'S-1-5-18','S-1-5-32-544','S-1-15-2-1','S-1-15-2-2')
+  $selectedRules = @($descriptor.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) |
+    Where-Object { $_.IdentityReference.Value -in $selectedSids } | Select-Object -First 32 |
+    ForEach-Object {
+      [ordered]@{sid=$_.IdentityReference.Value;rights=[string]$_.FileSystemRights;
+        rights_mask=[long]$_.FileSystemRights;type=[string]$_.AccessControlType;
+        inherited=[bool]$_.IsInherited;propagation=[string]$_.PropagationFlags;
+        inheritance=[string]$_.InheritanceFlags}
+    })
+  return [ordered]@{owner_sid=$descriptor.GetOwner([Security.Principal.SecurityIdentifier]).Value;
+    dacl_protected=[bool]$descriptor.AreAccessRulesProtected;rules=$selectedRules}
+}
+
 function Assert-WebViewAcl([string]$Directory) {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   try { $currentSid = $identity.User.Value } finally { $identity.Dispose() }
@@ -520,6 +535,16 @@ function Assert-WebViewAcl([string]$Directory) {
     # Require the authored user ACE; an inherited user or Administrators grant
     # must not hide a FormattedSDDL account that resolved to the wrong SID.
     if (($currentUserRights -band $fullControl) -ne $fullControl) {
+      $relative = $item.FullName.Substring($Directory.TrimEnd('\').Length).TrimStart('\')
+      if (-not $relative) { $relative = '.' }
+      try {
+        $result.webview_acl_failure = [ordered]@{relative_path=$relative;current_user_sid=$currentSid;
+          item=(Get-WebViewAclSnapshot $item.FullName $currentSid);
+          parent=(Get-WebViewAclSnapshot (Split-Path -Parent $item.FullName) $currentSid)}
+      } catch {
+        $result.webview_acl_failure = [ordered]@{relative_path=$relative;current_user_sid=$currentSid;
+          diagnostic_error_type=$_.Exception.GetType().FullName}
+      }
       throw 'WebView permissions lack explicit full control for the installing Windows user.'
     }
     foreach ($sid in @('S-1-15-2-1','S-1-15-2-2')) {
