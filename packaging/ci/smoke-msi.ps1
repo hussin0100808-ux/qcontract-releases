@@ -13,7 +13,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 Add-Type -AssemblyName System.Net.Http
 $resultRoot = Join-Path $env:RUNNER_TEMP 'qcontract-msi-results'
 $workRoot = Join-Path $env:RUNNER_TEMP ('qcontract-msi-' + [guid]::NewGuid().ToString('N'))
-$installRoot = Join-Path $workRoot 'Application'
+$installRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Programs\QContract'
 $dataRoot = Join-Path $env:LOCALAPPDATA 'QContract\Data'
 $diagRoot = Join-Path $workRoot 'diagnostic-data'
 New-Item -ItemType Directory -Path $resultRoot,$workRoot -Force | Out-Null
@@ -372,7 +372,7 @@ function Invoke-Msi([string]$Operation,[string]$LogName) {
   if ($Operation -eq 'uninstall') {
     $arguments = @('/x',$installedProduct,'/qn','/norestart','/l*v',('"'+$log+'"'))
   } else {
-    $arguments = @('/i',('"'+$candidatePath+'"'),'/qn','/norestart','ALLUSERS=""','MSIINSTALLPERUSER=1',('INSTALLDIR="'+$installRoot+'"'),'/l*v',('"'+$log+'"'))
+    $arguments = @('/i',('"'+$candidatePath+'"'),'/qn','/norestart','ALLUSERS=""','MSIINSTALLPERUSER=1','/l*v',('"'+$log+'"'))
     if ($Operation -eq 'reinstall') { $arguments += @('REINSTALL=ALL','REINSTALLMODE=vomus') }
   }
   $process = Start-Process -FilePath $msiexec -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
@@ -527,13 +527,15 @@ function Assert-WebViewAcl([string]$Directory) {
     if (@($currentUserRules | Where-Object { $_.AccessControlType -eq 'Deny' }).Count) {
       throw 'WebView permissions deny access to the installing Windows user.'
     }
+    $runtimeRoot = $item.FullName.TrimEnd('\') -ieq $Directory.TrimEnd('\')
     [long]$currentUserRights = 0
     foreach ($rule in ($currentUserRules | Where-Object {
-      $_.AccessControlType -eq 'Allow' -and -not $_.IsInherited -and
+      $_.AccessControlType -eq 'Allow' -and (-not $runtimeRoot -or -not $_.IsInherited) -and
       -not ($_.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly)
     })) { $currentUserRights = $currentUserRights -bor [long]$rule.FileSystemRights }
-    # Require the authored user ACE; an inherited user or Administrators grant
-    # must not hide a FormattedSDDL account that resolved to the wrong SID.
+    # The runtime root must have the authored user ACE. Windows may correctly
+    # inherit that exact user's grant onto descendants; Administrators/SYSTEM
+    # membership must never substitute for the installing user's own SID.
     if (($currentUserRights -band $fullControl) -ne $fullControl) {
       $relative = $item.FullName.Substring($Directory.TrimEnd('\').Length).TrimStart('\')
       if (-not $relative) { $relative = '.' }
@@ -545,7 +547,7 @@ function Assert-WebViewAcl([string]$Directory) {
         $result.webview_acl_failure = [ordered]@{relative_path=$relative;current_user_sid=$currentSid;
           diagnostic_error_type=$_.Exception.GetType().FullName}
       }
-      throw 'WebView permissions lack explicit full control for the installing Windows user.'
+      throw 'WebView permissions lack the required full control for the installing Windows user.'
     }
     foreach ($sid in @('S-1-15-2-1','S-1-15-2-2')) {
       $allow = @($rules | Where-Object { $_.IdentityReference.Value -eq $sid -and $_.AccessControlType -eq 'Allow' })
@@ -586,6 +588,7 @@ try {
   $result.candidate = [ordered]@{release_id=$request.release_id;asset_id=$request.asset_id;asset_name=$request.asset_name;
     version=$request.version;size=$request.size;sha256=$request.sha256;integrity_manifest_sha256=$request.expected_manifest.sha256}
   if (Test-Path -LiteralPath $dataRoot) { throw 'Disposable VM unexpectedly contains existing QContract data.' }
+  if (Test-Path -LiteralPath $installRoot) { throw 'Disposable VM unexpectedly contains the default QContract installation directory.' }
   $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Q Contract.lnk'
   $menuShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Q Contract\Q Contract.lnk'
   if ((Test-Path -LiteralPath $desktopShortcut) -or (Test-Path -LiteralPath $menuShortcut)) { throw 'Unexpected preexisting QContract shortcut.' }
@@ -635,6 +638,7 @@ try {
   if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'installed.marker')) -or
       (Get-Content -LiteralPath (Join-Path $installRoot 'installed.marker') -Raw) -notmatch '(?im)^Type\s*=\s*per-user\s*$' -or
       (Test-Path -LiteralPath (Join-Path $installRoot 'Data'))) { throw 'Per-user installed marker or data layout is invalid.' }
+  $result.default_install_path_verified = $true
   $installIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
   try { $installUserSid = $installIdentity.User.Value } finally { $installIdentity.Dispose() }
   $registrations = @(Get-MsiProductRegistrations $installedProduct)
