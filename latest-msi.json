@@ -2,12 +2,12 @@
   "payload": {
     "schema": 1,
     "purpose": "qcontract-update",
-    "version": "2.3.0",
-    "asset_name": "QContract-Setup-2.3.0.msi",
-    "size": 387137536,
-    "sha256": "bfa8dced9927133a4a44a9c8786119374f16c03fe3e1ad003a1d05b9b00402bf",
-    "release_notes": "إصدار MSI مستقل مع محرك القراءة المحلي ومتطلبات التشغيل واختصار سطح المكتب. اجتاز فحص Defender واختبارات التثبيت وإعادة التثبيت والإزالة على Windows Server 2025 معزول. الحزمة غير موقعة بشهادة ناشر Windows؛ بيانات قناة التحديث موقعة رقميًا. لم تُعتمد بعد على HP Wolf أو أجهزة Windows 10/11 الفعلية. الترقية المباشرة من مثبت EXE 2.2 غير مدعومة؛ هذه القناة لنسخ MSI.",
-    "url": "https://github.com/hussin0100808-ux/qcontract-releases/releases/download/v2.3.0/QContract-Setup-2.3.0.msi"
+    "version": "2.3.1",
+    "asset_name": "QContract-Setup-2.3.1.msi",
+    "size": 387096576,
+    "sha256": "8bfcd8168db61df7591bb5e177758dbfbec08038bd3755029510c8dea06ee25f",
+    "release_notes": "إصدار 2.3.1: تحسين تصدير PDF عبر Word، مع محاولة بديلة ورسائل خطأ أوضح، وتجربة زر التحديث من نسخة MSI 2.3.0. نجح تصدير ملف تجريبي من صفحتين محليًا. نُشر بطلب المستخدم دون اختبار تثبيت وترقية كامل داخل جهاز افتراضي. الحزمة غير موقعة بشهادة ناشر Windows؛ بيانات التحديث موقعة رقميًا. تُستخدم أيقونة Q البرتقالية الحالية. لم تُعتمد على HP Wolf أو أجهزة Windows 10/11 الفعلية. الترقية من مثبت EXE 2.2 غير مدعومة.",
+    "url": "https://github.com/hussin0100808-ux/qcontract-releases/releases/download/v2.3.1/QContract-Setup-2.3.1.msi"
   },
-  "signature": "FXm2MHgM8nvesQSJFb9czae+JD8WZiJFB+B7cp3FeX66C/4Qxs9nv3/Fm2YwyRnWu7G65frVpl+1fj52zyKpAA=="
+  "signature": "Xloyl65tbkpLvi3wYwl1NKSjgWQbj961jpYOIWE3fQBPAXuY3Cl6b4kn8kvW9nqt1rEs36JphBpwPDSRForPAA=="
 }
