@@ -107,3 +107,4 @@ jobs:
           retention-days: 3
           include-hidden-files: false
 # Diagnostic attempt 2: observe ACLs of the same verified installer.
+# Attempt 3: verify exact-user inheritance on the default installation path.
