@@ -386,6 +386,69 @@ function Invoke-Msi([string]$Operation,[string]$LogName) {
   }
 }
 
+function Get-MsiProductRegistrations([string]$ProductCode) {
+  if ($ProductCode -notmatch '^\{[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}\}$') { throw 'Invalid product code for read-only MSI inventory.' }
+  $systemDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::System)
+  if (-not [IO.Path]::IsPathRooted($systemDirectory) -or [IO.Path]::GetFileName($systemDirectory) -ine 'System32') { throw 'Cannot resolve the native Windows system directory.' }
+  Assert-MicrosoftSignature (Join-Path $systemDirectory 'msi.dll')
+  if (-not ('QContractQa.MsiInventory' -as [type])) {
+    # Metadata enumeration only. System32-only DLL resolution; no installer,
+    # product-open, action or repair API is exposed by this helper.
+    $inventorySource = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace QContractQa {
+  public sealed class MsiRegistration {
+    public string ProductCode;
+    public uint Context;
+    public string UserSid;
+  }
+  public static class MsiInventory {
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [DllImport("msi.dll", CharSet=CharSet.Unicode, ExactSpelling=true)]
+    private static extern uint MsiEnumProductsExW(string productCode, string userSid,
+      uint context, uint index, StringBuilder installedProductCode,
+      out uint installedContext, StringBuilder installedUserSid, ref uint userSidLength);
+    public static MsiRegistration[] Enumerate(string productCode) {
+      var registrations = new List<MsiRegistration>();
+      for (uint index=0; index<8; index++) {
+        var code = new StringBuilder(39);
+        var sid = new StringBuilder(1024);
+        uint sidLength = 1024;
+        uint context;
+        // NULL user SID: current user plus machine context, never other users.
+        uint status = MsiEnumProductsExW(productCode, null, 7, index, code,
+          out context, sid, ref sidLength);
+        if (status == 259) return registrations.ToArray();
+        if (status != 0) throw new InvalidOperationException(
+          "Read-only MSI inventory failed with code " + status + ".");
+        registrations.Add(new MsiRegistration {
+          ProductCode=code.ToString(), Context=context, UserSid=sid.ToString()
+        });
+      }
+      throw new InvalidOperationException("Unexpected MSI registration count.");
+    }
+  }
+}
+'@
+    Add-Type -TypeDefinition $inventorySource -ErrorAction Stop
+  }
+  return [QContractQa.MsiInventory]::Enumerate($ProductCode)
+}
+
+function Assert-MsiRegistrationContext([object[]]$Registrations,[string]$ProductCode,[string]$CurrentSid,[bool]$Absent=$false) {
+  if ($Absent) {
+    if ($Registrations.Count -ne 0) { throw 'Uninstall left a Windows Installer product registration.' }
+    return
+  }
+  if ($Registrations.Count -ne 1 -or $Registrations[0].ProductCode -ine $ProductCode -or
+      [int]$Registrations[0].Context -notin @(1,2) -or $Registrations[0].UserSid -ine $CurrentSid) {
+    throw 'Windows Installer did not register exactly this product for the current user without machine context.'
+  }
+}
+
 function Assert-PayloadIntegrity {
   $path = Resolve-PayloadPath $installRoot $request.expected_manifest.path
   Assert-Hash $path $request.expected_manifest.sha256
@@ -547,9 +610,13 @@ try {
   if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'installed.marker')) -or
       (Get-Content -LiteralPath (Join-Path $installRoot 'installed.marker') -Raw) -notmatch '(?im)^Type\s*=\s*per-user\s*$' -or
       (Test-Path -LiteralPath (Join-Path $installRoot 'Data'))) { throw 'Per-user installed marker or data layout is invalid.' }
-  $userUninstall = Join-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' $installedProduct
-  if (-not (Test-Path -LiteralPath $userUninstall) -or
-      (Test-Path -LiteralPath (Join-Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall' $installedProduct))) { throw 'Product was not registered exclusively for this user.' }
+  $installIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  try { $installUserSid = $installIdentity.User.Value } finally { $installIdentity.Dispose() }
+  $registrations = @(Get-MsiProductRegistrations $installedProduct)
+  Assert-MsiRegistrationContext $registrations $installedProduct $installUserSid
+  $result.per_user_registration_verified = $true
+  $result.msi_install_context = [int]$registrations[0].Context
+  $result.install_user_sid_matches = $true
   Assert-PayloadIntegrity
   Invoke-DefenderScan $installRoot 'payload'
   $prereqs = Assert-SecondaryManifest (Join-Path $installRoot 'runtime\prerequisites.json') $installRoot $true
@@ -600,9 +667,11 @@ try {
   $null = Invoke-PythonJson $python @('-X','utf8',$fixture,'verify',$dataRoot,$baseline) 'reinstall-data'
   Invoke-Msi 'uninstall' 'uninstall'
   $null = Invoke-PythonJson $systemPython @('-X','utf8',$fixture,'verify',$dataRoot,$baseline) 'uninstall-data'
+  $remainingRegistrations = @(Get-MsiProductRegistrations $installedProduct)
+  Assert-MsiRegistrationContext $remainingRegistrations $installedProduct $installUserSid $true
+  $result.uninstall_registration_removed = $true
   if ((Test-Path -LiteralPath $desktopShortcut) -or (Test-Path -LiteralPath $menuShortcut) -or
-      (Test-Path -LiteralPath (Join-Path $installRoot 'app\desktop_host\QContract.exe')) -or
-      (Test-Path -LiteralPath $userUninstall)) { throw 'Uninstall left an installed product or shortcut.' }
+      (Test-Path -LiteralPath (Join-Path $installRoot 'app\desktop_host\QContract.exe'))) { throw 'Uninstall left an installed product or shortcut.' }
   Assert-DefenderActive
   $result.data_preserved=$true; $result.synthetic_only=$true; $result.status='passed'
   # Passing this candidate job does not publish or clear the HP Wolf review gate.
