@@ -10,5 +10,6 @@
   "expected_manifest": {
     "path": "runtime/client-integrity.json",
     "sha256": "005cc88183b4036beab0db4827aee50cc42ee10b66447048388856517710bd2e"
-  }
+  },
+  "verification_attempt": 2
 }
