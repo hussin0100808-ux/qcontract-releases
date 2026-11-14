@@ -108,3 +108,4 @@ jobs:
           include-hidden-files: false
 # Diagnostic attempt 2: observe ACLs of the same verified installer.
 # Attempt 3: verify exact-user inheritance on the default installation path.
+# Attempt 4: check effective exact-user rights, including valid root inheritance.
