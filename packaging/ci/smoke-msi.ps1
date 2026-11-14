@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$RequestPath)
+param([Parameter(Mandatory=$true)][string]$RequestPath,[string]$StagedCandidatePath)
 
 # This is an execution harness for an ephemeral GitHub VM, never a local installer.
 $ErrorActionPreference = 'Stop'
@@ -6,7 +6,7 @@ Set-StrictMode -Version 2
 $repository = 'hussin0100808-ux/qcontract-releases'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or
     $env:RUNNER_OS -ne 'Windows' -or $env:GITHUB_REPOSITORY -ne $repository -or
-    $env:GITHUB_REF -ne 'refs/heads/main' -or -not $env:RUNNER_TEMP) {
+    $env:GITHUB_REF -ne 'refs/heads/main' -or $env:GITHUB_JOB -ne 'smoke' -or -not $env:RUNNER_TEMP) {
   throw 'Refusing execution outside the approved GitHub-hosted Windows main-branch job.'
 }
 
@@ -492,27 +492,42 @@ try {
   $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Q Contract.lnk'
   $menuShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Q Contract\Q Contract.lnk'
   if ((Test-Path -LiteralPath $desktopShortcut) -or (Test-Path -LiteralPath $menuShortcut)) { throw 'Unexpected preexisting QContract shortcut.' }
-  $handler = New-Object System.Net.Http.HttpClientHandler
-  $handler.AllowAutoRedirect = $false
-  $http = New-Object System.Net.Http.HttpClient($handler)
-  $http.Timeout = [TimeSpan]::FromMinutes(10)
-  try {
-    $release = Get-ApiJson ('https://api.github.com/repos/'+$repository+'/releases/'+$request.release_id)
-    if ($release.id -ne $request.release_id -or $release.draft -ne $true) { throw 'Candidate must belong to the exact draft release.' }
-    $assets = @($release.assets | Where-Object { $_.id -eq $request.asset_id })
-    if ($assets.Count -ne 1) { throw 'Candidate asset ID is absent or ambiguous.' }
-    $asset = $assets[0]
-    if ($asset.name -cne $request.asset_name -or $asset.size -ne $request.size -or $asset.state -ne 'uploaded' -or
-        $asset.url -cne ('https://api.github.com/repos/'+$repository+'/releases/assets/'+$request.asset_id)) { throw 'Draft candidate metadata mismatch.' }
-    if ($asset.PSObject.Properties.Name -contains 'digest') {
-      if ($asset.digest -and $asset.digest -cne ('sha256:'+$request.sha256)) { throw 'GitHub asset digest mismatch.' }
+  if ($StagedCandidatePath) {
+    # The other job holds the draft-read credential. This fresh VM receives only
+    # one same-run artifact; verify its expected fixed location and exact bytes.
+    $expectedStagedPath = Resolve-PayloadPath $env:RUNNER_TEMP 'qcontract-msi-transfer/candidate.msi'
+    if ([IO.Path]::GetFullPath($StagedCandidatePath) -ine $expectedStagedPath) { throw 'Unexpected staged candidate location.' }
+    Assert-Hash $expectedStagedPath $request.sha256 ([long]$request.size)
+    if (Test-Path -LiteralPath $candidatePath) { throw 'Candidate destination already exists.' }
+    Copy-Item -LiteralPath $expectedStagedPath -Destination $candidatePath
+    $result.candidate_transport = 'same-run-artifact-from-separate-fetch-job'
+  } else {
+    $handler = New-Object System.Net.Http.HttpClientHandler
+    $handler.AllowAutoRedirect = $false
+    $http = New-Object System.Net.Http.HttpClient($handler)
+    $http.Timeout = [TimeSpan]::FromMinutes(10)
+    try {
+      $release = Get-ApiJson ('https://api.github.com/repos/'+$repository+'/releases/'+$request.release_id)
+      if ($release.id -ne $request.release_id -or $release.draft -ne $true) { throw 'Candidate must belong to the exact draft release.' }
+      $assets = @($release.assets | Where-Object { $_.id -eq $request.asset_id })
+      if ($assets.Count -ne 1) { throw 'Candidate asset ID is absent or ambiguous.' }
+      $asset = $assets[0]
+      if ($asset.name -cne $request.asset_name -or $asset.size -ne $request.size -or $asset.state -ne 'uploaded' -or
+          $asset.url -cne ('https://api.github.com/repos/'+$repository+'/releases/assets/'+$request.asset_id)) { throw 'Draft candidate metadata mismatch.' }
+      if ($asset.PSObject.Properties.Name -contains 'digest') {
+        if ($asset.digest -and $asset.digest -cne ('sha256:'+$request.sha256)) { throw 'GitHub asset digest mismatch.' }
+      }
+      Save-Candidate $asset.url ([long]$request.size)
+    } finally {
+      $http.Dispose(); $handler.Dispose(); $token=$null
+      foreach ($variable in @('QA_GITHUB_TOKEN','GITHUB_TOKEN','GH_TOKEN','ACTIONS_RUNTIME_TOKEN','ACTIONS_ID_TOKEN_REQUEST_TOKEN')) {
+        [Environment]::SetEnvironmentVariable($variable,$null,'Process')
+      }
     }
-    Save-Candidate $asset.url ([long]$request.size)
-  } finally {
-    $http.Dispose(); $handler.Dispose(); $token=$null
-    foreach ($variable in @('QA_GITHUB_TOKEN','GITHUB_TOKEN','GH_TOKEN','ACTIONS_RUNTIME_TOKEN','ACTIONS_ID_TOKEN_REQUEST_TOKEN')) {
-      [Environment]::SetEnvironmentVariable($variable,$null,'Process')
-    }
+  }
+  $token=$null
+  foreach ($variable in @('QA_GITHUB_TOKEN','GITHUB_TOKEN','GH_TOKEN','ACTIONS_RUNTIME_TOKEN','ACTIONS_ID_TOKEN_REQUEST_TOKEN')) {
+    [Environment]::SetEnvironmentVariable($variable,$null,'Process')
   }
   Assert-Hash $candidatePath $request.sha256 ([long]$request.size)
   $result.candidate_hash_verified = $true
