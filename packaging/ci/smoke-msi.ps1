@@ -527,15 +527,14 @@ function Assert-WebViewAcl([string]$Directory) {
     if (@($currentUserRules | Where-Object { $_.AccessControlType -eq 'Deny' }).Count) {
       throw 'WebView permissions deny access to the installing Windows user.'
     }
-    $runtimeRoot = $item.FullName.TrimEnd('\') -ieq $Directory.TrimEnd('\')
     [long]$currentUserRights = 0
     foreach ($rule in ($currentUserRules | Where-Object {
-      $_.AccessControlType -eq 'Allow' -and (-not $runtimeRoot -or -not $_.IsInherited) -and
+      $_.AccessControlType -eq 'Allow' -and
       -not ($_.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly)
     })) { $currentUserRights = $currentUserRights -bor [long]$rule.FileSystemRights }
-    # The runtime root must have the authored user ACE. Windows may correctly
-    # inherit that exact user's grant onto descendants; Administrators/SYSTEM
-    # membership must never substitute for the installing user's own SID.
+    # Windows may inherit the exact user's grant onto the root or descendants
+    # rather than duplicate it. Administrators/SYSTEM membership must never
+    # substitute for the installing user's own SID.
     if (($currentUserRights -band $fullControl) -ne $fullControl) {
       $relative = $item.FullName.Substring($Directory.TrimEnd('\').Length).TrimStart('\')
       if (-not $relative) { $relative = '.' }
