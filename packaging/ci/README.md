@@ -21,8 +21,8 @@ The request .qa/msi-candidate-request.json has this shape:
 }
 ```
 
-ready=false deliberately skips installation and produces a failed readiness
-result. Set ready=true only after review, with the actual draft release and
+ready=false stops the fetch job before transfer or installation.
+Set ready=true only after review, with the actual draft release and
 asset IDs, bytes and hashes. Release and asset metadata, the complete MSI hash,
 and an active Defender custom scan are checked before opening its MSI database
 or running Windows Installer. Every installed payload file is checked against
@@ -30,8 +30,14 @@ the separately pinned integrity manifest before executing bundled code.
 
 Execution is allowed only inside a GitHub-hosted Windows job in the fixed
 release repository. Never run smoke-msi.ps1 on an owner's or tester's computer.
-The token has contents:read only, is sent only to the initial GitHub API host,
-and is cleared before installation; redirected downloads receive no token.
+The fetch-only job has contents:write because GitHub requires push access to
+read a draft release. It downloads and hashes bytes only: no MSI database open,
+Windows Installer action, or client-code execution occurs in that VM. Its token
+is sent only to the initial GitHub API host; redirects receive no credential.
+The install job runs in a separate fresh VM with contents:read only. It receives
+the exact same-run artifact ID emitted by the fetch job, then checks its fixed
+temporary path, size and SHA256 before Defender, MSI metadata or installation.
+The write credential is never transferred to that VM.
 Creating the workflow file itself may require GitHub Workflows write permission;
 this does not justify expanding the activation app's existing permissions.
 
@@ -53,9 +59,13 @@ A bundled-process DLL probe checks that VC runtime DLLs resolve inside the packa
 rather than relying on preinstalled development tools. The inference process gets
 its own outbound firewall block in this disposable VM. Firewall profiles must
 already be enabled; its unique process rule is removed in finally.
-Only synthetic state is used; logs and result JSON expire
-after three days. No real IDs, license, private keys, user data, profile, MSI, or
-download URLs are uploaded as workflow artifacts.
+Only synthetic state is used; logs and result JSON expire after three days.
+The intermediate MSI-only artifact expires after one day. In a public repository
+it can be downloaded by authenticated readers; it is not private like the draft
+release and must not be treated as an approved installer. No real IDs, license,
+private keys, customer data, profile, credentials, or signed download URLs are
+included in artifacts. The client candidate has already passed the owner's
+Defender scan and private-data exclusion review before this transport is used.
 
 Checks cover fresh per-user install, desktop/Start shortcut and AUMID, marker,
 .NET/standalone host diagnosis, fixed WebView vendor signature and AppContainer
