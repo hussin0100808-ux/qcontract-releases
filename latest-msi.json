@@ -1,0 +1,13 @@
+{
+  "payload": {
+    "schema": 1,
+    "purpose": "qcontract-update",
+    "version": "2.3.0",
+    "asset_name": "QContract-Setup-2.3.0.msi",
+    "size": 387137536,
+    "sha256": "bfa8dced9927133a4a44a9c8786119374f16c03fe3e1ad003a1d05b9b00402bf",
+    "release_notes": "إصدار MSI مستقل مع محرك القراءة المحلي ومتطلبات التشغيل واختصار سطح المكتب. اجتاز فحص Defender واختبارات التثبيت وإعادة التثبيت والإزالة على Windows Server 2025 معزول. الحزمة غير موقعة بشهادة ناشر Windows؛ بيانات قناة التحديث موقعة رقميًا. لم تُعتمد بعد على HP Wolf أو أجهزة Windows 10/11 الفعلية. الترقية المباشرة من مثبت EXE 2.2 غير مدعومة؛ هذه القناة لنسخ MSI.",
+    "url": "https://github.com/hussin0100808-ux/qcontract-releases/releases/download/v2.3.0/QContract-Setup-2.3.0.msi"
+  },
+  "signature": "FXm2MHgM8nvesQSJFb9czae+JD8WZiJFB+B7cp3FeX66C/4Qxs9nv3/Fm2YwyRnWu7G65frVpl+1fj52zyKpAA=="
+}
